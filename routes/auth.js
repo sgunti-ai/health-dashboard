@@ -82,4 +82,34 @@ router.get('/me', verifyToken, async (req, res) => {
   }
 });
 
+// PATCH /api/auth/timeline — save user's custom timeline
+router.patch('/timeline', verifyToken, async (req, res) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be an array' });
+    const sanitized = items
+      .map((it, i) => ({
+        time:  String(it.time  || '').trim().slice(0, 20),
+        text:  String(it.text  || '').trim().slice(0, 120),
+        order: typeof it.order === 'number' ? it.order : i
+      }))
+      .filter(it => it.time && it.text);
+    if (sanitized.length === 0) return res.status(400).json({ error: 'At least one valid item is required' });
+    await User.findByIdAndUpdate(req.user.userId, { customTimeline: sanitized });
+    res.json({ message: 'Timeline saved', count: sanitized.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/auth/timeline — reset to phase default
+router.delete('/timeline', verifyToken, async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user.userId, { $unset: { customTimeline: 1 } });
+    res.json({ message: 'Timeline reset to phase default' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

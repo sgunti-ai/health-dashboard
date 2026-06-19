@@ -1,5 +1,11 @@
 const mongoose = require('mongoose');
 
+const TimelineItemSchema = new mongoose.Schema({
+  time:  { type: String, required: true, trim: true },
+  text:  { type: String, required: true, trim: true },
+  order: { type: Number, default: 0 }
+}, { _id: false });
+
 const UserSchema = new mongoose.Schema({
   email: {
     type: String, required: true, unique: true,
@@ -17,6 +23,8 @@ const UserSchema = new mongoose.Schema({
     startDate: Date,
     dietaryPreferences: [String]
   },
+  // undefined = not customised (use phase default); array = user's custom timeline
+  customTimeline: { type: [TimelineItemSchema], default: undefined },
   lastActiveAt: Date
 }, { timestamps: true });
 
