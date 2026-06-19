@@ -7,7 +7,6 @@ let weightChartInstance = null;
 function buildTimeline() {
   const phaseIdx = getUserPhaseIndex();
   const curMonthIdx = getUserMonthIndex();
-  const phaseTasks = PHASE_TASKS[phaseIdx];
   const container = document.getElementById("timelineContainer");
   container.innerHTML = "";
 
@@ -44,12 +43,16 @@ function buildTimeline() {
     container.appendChild(mealsDiv);
   }
 
-  // ── Phase tasks ──
-  phaseTasks.forEach(function(task, i) {
+  // ── Use custom timeline if saved, else fall back to phase default ──
+  const tasks = (currentUser && currentUser.customTimeline && currentUser.customTimeline.length > 0)
+    ? currentUser.customTimeline.slice().sort((a, b) => a.order - b.order)
+    : PHASE_TASKS[phaseIdx];
+
+  tasks.forEach(function(task, i) {
     const div = document.createElement("div");
     div.className = "timeline-item";
     div.id = "titem-" + i;
-    div.innerHTML = "<span class='t-time'>" + task.time + "</span><span class='t-text'>" + task.text + "</span><input type='checkbox' id='chk-" + i + "' onchange='onCheckChange(" + i + ")'>";
+    div.innerHTML = "<span class='t-time'>" + task.time + "</span><span class='t-text'>" + task.text + "</span><input type='checkbox' id='chk-" + i + "' onchange='onCheckChange(" + i + ")'>"; 
     container.appendChild(div);
   });
   updateCheckStat();
@@ -63,11 +66,14 @@ function onCheckChange(i) {
 }
 
 function updateCheckStat() {
-  const total = PHASE_TASKS[getUserPhaseIndex()].length;
+  const tasks = (currentUser && currentUser.customTimeline && currentUser.customTimeline.length > 0)
+    ? currentUser.customTimeline
+    : PHASE_TASKS[getUserPhaseIndex()];
+  const total = tasks.length;
   let done = 0;
-  for(let i=0;i<total;i++) {
-    const c = document.getElementById("chk-"+i);
-    if(c && c.checked) done++;
+  for (let i = 0; i < total; i++) {
+    const c = document.getElementById("chk-" + i);
+    if (c && c.checked) done++;
   }
   document.getElementById("checkStat").textContent = done + "/" + total;
 }
@@ -99,11 +105,14 @@ async function loadDateData() {
     const res = await apiFetch("/api/logs/" + date);
     const data = await res.json();
     // Sync checklist
-    const phLen = PHASE_TASKS[getUserPhaseIndex()].length; for(let i=0;i<phLen;i++) {
-      const chk = document.getElementById("chk-"+i);
-      if(chk) {
-      chk.checked = (data.checklist && data.checklist[i] && data.checklist[i].done) || false;
-        document.getElementById("titem-"+i).classList.toggle("done", chk.checked);
+    const tasks = (currentUser && currentUser.customTimeline && currentUser.customTimeline.length > 0)
+      ? currentUser.customTimeline
+      : PHASE_TASKS[getUserPhaseIndex()];
+    for (let i = 0; i < tasks.length; i++) {
+      const chk = document.getElementById("chk-" + i);
+      if (chk) {
+        chk.checked = (data.checklist && data.checklist[i] && data.checklist[i].done) || false;
+        document.getElementById("titem-" + i).classList.toggle("done", chk.checked);
       }
     }
     // Weight
@@ -136,7 +145,13 @@ async function syncData() {
   const notes = document.getElementById("workoutNotes").value;
   document.getElementById("weightStat").textContent = weight;
   updateBMI(weight);
-  const pTasks = PHASE_TASKS[getUserPhaseIndex()]; const checklist = pTasks.map((_, i) => { const c = document.getElementById("chk-"+i); return { done: c ? c.checked : false }; });
+  const tasks = (currentUser && currentUser.customTimeline && currentUser.customTimeline.length > 0)
+    ? currentUser.customTimeline
+    : PHASE_TASKS[getUserPhaseIndex()];
+  const checklist = tasks.map((task, i) => {
+    const c = document.getElementById("chk-" + i);
+    return { label: task.text, done: c ? c.checked : false };
+  });
   const payload = { date, checklist, waterIntake: waterLevel, weight, completedWorkout: document.getElementById("workoutToggle").checked, moodScore: currentMoodScore, energyScore: currentEnergyScore, notes };
   try {
     await apiFetch("/api/logs", { method:"POST", body: payload });
@@ -160,5 +175,72 @@ function setGreeting() {
   const h = new Date().getHours();
   const greet = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
   const day = new Date().toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long"});
-  document.getElementById("dashGreeting").textContent = `${greet}, Karthik! · ${day}`;
+  // Use the logged-in user's first name; fall back to 'there' if unavailable
+  const name = (currentUser && currentUser.name) ? currentUser.name.split(' ')[0] : 'there';
+  document.getElementById("dashGreeting").textContent = `${greet}, ${name}! · ${day}`;
+}
+
+// ── Timeline Editor ──────────────────────────────────────────────────
+
+function openTimelineEditor() {
+  const tasks = (currentUser && currentUser.customTimeline && currentUser.customTimeline.length > 0)
+    ? currentUser.customTimeline.slice().sort((a, b) => a.order - b.order)
+    : PHASE_TASKS[getUserPhaseIndex()];
+  const list = document.getElementById("tlEditorList");
+  list.innerHTML = "";
+  tasks.forEach(task => addTimelineEditorRow(task.time, task.text));
+  document.getElementById("timelineEditorOverlay").style.display = "flex";
+}
+
+function closeTimelineEditor() {
+  document.getElementById("timelineEditorOverlay").style.display = "none";
+}
+
+function addTimelineEditorRow(time, text) {
+  time = time || "";
+  text = text || "";
+  const list = document.getElementById("tlEditorList");
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:8px;align-items:center";
+  row.innerHTML =
+    "<input type='text' placeholder='06:30 AM' value='" + time.replace(/'/g, "&#39;") + "' maxlength='20'" +
+    " style='width:90px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:.82rem;background:#f8f9fa'>" +
+    "<input type='text' placeholder='Task description' value='" + text.replace(/'/g, "&#39;") + "' maxlength='120'" +
+    " style='flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:.82rem;background:#f8f9fa'>" +
+    "<button onclick='this.parentElement.remove()'" +
+    " style='background:#fee2e2;border:none;color:#dc2626;padding:7px 10px;border-radius:8px;cursor:pointer;font-weight:700'>✕</button>";
+  list.appendChild(row);
+}
+
+async function saveCustomTimeline() {
+  const rows = document.querySelectorAll("#tlEditorList > div");
+  const items = Array.from(rows).map((row, i) => {
+    const inputs = row.querySelectorAll("input");
+    return { time: inputs[0].value.trim(), text: inputs[1].value.trim(), order: i };
+  }).filter(it => it.time && it.text);
+
+  if (items.length === 0) {
+    alert("Please add at least one timeline task.");
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/auth/timeline", { method: "PATCH", body: { items } });
+    if (res && res.ok) {
+      currentUser.customTimeline = items;
+      buildTimeline();
+      closeTimelineEditor();
+    }
+  } catch (e) { console.warn("saveCustomTimeline failed", e); }
+}
+
+async function resetToPhaseTimeline() {
+  if (!confirm("Reset to phase default? Your custom tasks will be removed.")) return;
+  try {
+    const res = await apiFetch("/api/auth/timeline", { method: "DELETE" });
+    if (res && res.ok) {
+      currentUser.customTimeline = undefined;
+      buildTimeline();
+      closeTimelineEditor();
+    }
+  } catch (e) { console.warn("resetToPhaseTimeline failed", e); }
 }
